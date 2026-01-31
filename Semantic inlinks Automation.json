@@ -1,0 +1,488 @@
+{
+  "name": "Semantic inlinks - Public Template",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        0
+      ],
+      "id": "4f69eab6-6432-48d5-a75d-0ea9f05abb2b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        96,
+        0
+      ],
+      "id": "5ef43687-4990-4c40-8c0e-7d10daf13009",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        0
+      ],
+      "id": "94629f39-9b5c-4dd0-a068-6c734d9bc759",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "=article",
+              "cssSelector": "article"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        0
+      ],
+      "id": "24f8cce6-01f7-4f49-9fce-cf48c0344eff",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Name: seo_internal_link_injector_v1\nGoal: Insert specific hyperlinks into a blog post HTML string, utilizing contextual sentence injection if keywords are missing, while strictly preserving existing content and outputting valid semantic HTML.\nTemperature: 0.2\nTop-K: 40\nTop-P: 0.95\nPrompt:\nYou are an expert SEO Content Editor and HTML Specialist. Your task is to take a raw HTML blog post and a list of target URLs, and integrate these URLs as hyperlinks into the content. You must adhere to strict formatting and \"Ghostwriter\" insertion rules.\n\n**Critical Instructions:**\n\n**1. Hyperlink Formatting:**\n\n* You must use standard HTML `<a href=https://example.com/...>` tags.\n* **Do not** use Markdown (e.g., `[Link](url)`).\n* **Do not** add \"Read more\" or \"Click here\". Link existing relevant keywords naturally.\n* **Example:**\n* *Input Text:* \"PPC campaigns are essential.\"\n* *Target:* Topic: PPC | URL: [https://example.com/ppc](https://example.com/ppc)\n* *Output:* `<a href=https://example.com/ppc>PPC campaigns</a> are essential.`\n\n\n\n**2. The \"Ghostwriter\" Rule (Contextual Injection):**\n\n* **Scan first:** Look for natural keyword matches for the target links in the existing text.\n* **If NOT found:** You must write a **new sentence** to include the topic/link.\n* **Placement:** Insert this new sentence inside a paragraph that is topically relevant to the link. Do not place a \"Budgeting\" link in a \"Creative Writing\" paragraph.\n* **Tone:** Mimic the original author's tone perfectly (Academic/Professional).\n* **Frequency:** Link a specific topic/URL combination only once or twice. Do not spam.\n\n**3. Output Formatting & Cleanup:**\n\n* **Allowed Tags:** Use ONLY semantic HTML tags: `<p>`, `<h2>` (Title Case), `<ul>`, `<li>`, `<strong>`, and `<a href=\"...\">`.\n* **Forbidden Content:**\n* Remove all `<img>` tags.\n* Remove metadata lines (e.g., \"Author\", \"Date\", breadcrumbs).\n* Remove the main `<h1>` title if it repeats the input title.\n* Do not include `<html>`, `<head>`, `<body>`, or `<script>` tags.\n\n\n* **Content Integrity:** Do not change the original text content aside from adding links or the necessary \"Ghostwriter\" sentences. Do not summarize or rewrite.\n\n**4. Processing Logic:**\n\n* Check the target list against the text.\n* Insert links on existing keywords where possible.\n* Draft and insert contextual sentences for missing keywords (Ghostwriter).\n* Strip forbidden tags and metadata.\n* Output the final result.\n\n**Output:**\nReturn only the cleaned, linked HTML code.\n\n**Inputs:**\n\n1. **Target Links List:**\n{{ $json.targets_list }}\n2. **Original Article (HTML):**\n{{ $('HTML').item.json.article }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1600,
+        0
+      ],
+      "id": "2d9b0ad7-279c-4c87-96ea-23210f847566",
+      "name": "Basic LLM Chain",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. RETRIEVE ALL DATA AND CURRENT ROW\n// specific check for the 'Get row(s) in sheet' node name\nconst allRows = $('Get row(s) in sheet').all(); \n\n// specific check for the 'Loop Over Items' node name\nconst currentRow = $('Loop Over Items').item.json;\n\n// 2. DEFINE CURRENT CLUSTER/TOPIC\n// Check if your column is named \"Topic\", \"Cluster\", or \"Main Topic\" in the Sheet\n// Enter the column name exactly below (Case sensitive)\nconst currentTopic = currentRow['Topic'] || currentRow['Main Topic']; \nconst currentUrl = currentRow['URL'];\n\nlet targets = [];\n\n// 3. INTELLIGENT FILTERING (CLUSTER MATCHING)\nif (currentTopic) {\n    // Filter only for items within the same topic/cluster\n    targets = allRows.filter(item => {\n        const row = item.json;\n        \n        // A. Topic Match (Case-insensitive to prevent mismatch errors)\n        // E.g. match \"google ads\" with \"Google Ads\"\n        const rowTopic = row['Topic'] || row['Main Topic'] || \"\";\n        const isTopicMatch = rowTopic.trim().toLowerCase() === currentTopic.trim().toLowerCase();\n\n        // B. Exclude Self (Prevent self-linking)\n        const isNotSelf = row.URL !== currentUrl;\n\n        return isTopicMatch && isNotSelf;\n    });\n} else {\n    // If the row topic is empty, return an empty list (no links can be generated)\n    targets = [];\n}\n\n// 4. FORMAT THE LIST FOR LLM\n// Prepare the text payload for the AI model\nconst formattedList = targets.map(item => {\n    const r = item.json;\n    // Translated string template for English context\n    return `- Topic: ${r['Topic']} | Title: ${r['Title'] || r['Topic']} | URL: ${r['URL']}`;\n});\n\nreturn {\n    json: {\n        // If no other articles exist in the cluster, signal \"NO_LINKS\" to the AI\n        targets_list: formattedList.length > 0 ? formattedList.join('\\n') : \"NO_RELEVANT_LINKS_FOUND\",\n        cluster_name: currentTopic,\n        link_count: formattedList.length\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        0
+      ],
+      "id": "76bdaac0-10ab-4886-b81f-c3535a07d679",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. RETRIEVE LLM OUTPUT\nlet text = $('Basic LLM Chain').item.json.text || $('Basic LLM Chain').item.json.response || \"\";\n\n// --- SECTION 0: UNQUOTED HREF FIX (CMS COMPATIBILITY) ---\n// Stripping quotes from href attributes to prevent parsing errors in WordPress/CMS.\ntext = text.replace(/<a\\s+[^>]*?href=[\"']*([^\\s\"'>]+)[\"']*[^>]*>(.*?)<\\/a>/gi, '<a href=$1>$2</a>');\n\n// --- SECTION 1: CONTENT SANITIZATION ---\n// Remove images, specific placeholders, and empty paragraphs.\ntext = text.replace(/<img[^>]*>/gi, '');\ntext = text.replace(/Your Brand Name/gi, ''); // Placeholder removal\ntext = text.replace(/Author/gi, '');\ntext = text.replace(/<p>\\s*<\\/p>/gi, ''); // Remove empty p tags\ntext = text.replace(/<p><br><\\/p>/gi, '');\n\n// --- SECTION 2: FORMATTING & HEADING NORMALIZATION ---\ntext = text.split('\\\\n').join('\\n');\ntext = text.replace(/```html/gi, '').replace(/```/g, ''); // Remove code block markers\ntext = text.replace(/^\"|\"$/g, '').trim(); \n\n// 1. Convert Markdown Headings to HTML (## -> H2, ### -> H3)\ntext = text.replace(/^##\\s+(.*)$/gm, '<h2>$1</h2>');\ntext = text.replace(/^###\\s+(.*)$/gm, '<h3>$1</h3>');\n// Force lines starting with numbers (e.g., \"1. Introduction\") to become H2 for consistency\ntext = text.replace(/^(\\d+\\.\\s+.*)$/gm, '<h2>$1</h2>');\n\n// 2. TITLE CASE NORMALIZER\n// Finds H2/H3 tags and converts content to Title Case to fix ALL CAPS issues from LLM.\ntext = text.replace(/<(h[23])>(.*?)<\\/\\1>/gi, function(match, tag, content) {\n    // First, convert everything to lowercase\n    let lower = content.toLowerCase();\n    // Then capitalize the start of words (handles space, quotes, parentheses)\n    let titleCase = lower.replace(/(?:^|\\s|[\"'([{])+\\S/g, letter => letter.toUpperCase());\n    \n    // Note: Logic for stopwords (of, and, the) can be added here if strict casing is needed.\n    // Standard Title Case is sufficient for current needs.\n    return `<${tag}>${titleCase}</${tag}>`;\n});\n\n// Convert Markdown Bold (**text**) -> HTML <strong>text</strong>\ntext = text.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');\n\n// --- SECTION 3: INTRO PARAGRAPH HANDLING ---\n// If the text doesn't start with an HTML tag, wrap the first text block in <p>\nif (!text.trim().startsWith('<')) {\n    const firstTagIndex = text.indexOf('<');\n    if (firstTagIndex !== -1) {\n        let intro = text.substring(0, firstTagIndex).trim();\n        const rest = text.substring(firstTagIndex);\n        if (intro.length > 20) {\n            text = `<p>${intro}</p>\\n\\n${rest}`;\n        } else {\n            text = rest;\n        }\n    }\n}\n\n// --- SECTION 4: SPACING & READABILITY ---\n// Add newlines between block elements for cleaner HTML output in Sheets/CMS\ntext = text.replace(/(<h[23])/gi, '\\n\\n$1');\ntext = text.replace(/(<p)/gi, '\\n\\n$1'); \ntext = text.replace(/(<ul)/gi, '\\n\\n$1');\ntext = text.replace(/(<\\/h[23]>)/gi, '$1\\n'); \ntext = text.replace(/(<\\/p>)/gi, '$1\\n');\ntext = text.replace(/(<\\/ul>)/gi, '$1\\n');\ntext = text.replace(/\\n{3,}/g, '\\n\\n'); // Collapse excessive newlines\n\nreturn {\n    json: {\n        final_html_for_sheets: text.trim()\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        0
+      ],
+      "id": "77465fe8-f596-46f7-a2bc-22dbd0861342",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        2240,
+        0
+      ],
+      "id": "85480ff3-c4ed-4b27-bba3-473291dfb158",
+      "name": "Update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ecf79e7b-41e3-46df-b68c-9a4e66da67a0",
+              "leftValue": "={{ $json.Status }}",
+              "rightValue": "Done",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        336,
+        0
+      ],
+      "id": "c265256e-cf45-4081-9c63-1a183d2754fa",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        544,
+        0
+      ],
+      "id": "3d8c1cf6-1cad-4b0b-b288-498ce97bdef9",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "content": "## Get The Sheet\n",
+        "height": 288,
+        "width": 208
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        32,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "09ea3f50-a1d2-4294-b509-fec9cc192d85",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Filter and Loop",
+        "height": 288,
+        "width": 384,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        320,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "ff32f80e-b029-401a-9352-0d638061c7da",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Scrape the Page",
+        "height": 288,
+        "width": 224,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        736,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "6db004ea-3893-46d8-87e0-dbe461ce62d0",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## Extract the content of the page",
+        "height": 288,
+        "width": 256,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        992,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "7f439c35-b753-48e2-a7e5-8a500f564cdf",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## Set up the URLs",
+        "height": 288,
+        "width": 208,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1280,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "0310f9b3-4ee0-4316-bff3-a8b32d500419",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## Format and Give Inlink",
+        "height": 448,
+        "width": 336,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1552,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "34a49401-2cb8-4189-b779-7113c136945f",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "## Clear Just In Case",
+        "height": 288
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1920,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "5cbd5daf-4fd4-494e-a470-d8ba0e809f4b",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "## Add to The Sheets",
+        "height": 288,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2192,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "9765777a-be1e-47c5-ba69-94cf88e05e0e",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "model": "tngtech/deepseek-r1t2-chimera:free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        224
+      ],
+      "id": "77ef07ec-6313-4052-bbaa-3399df177551",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "OPENROUTER_CREDENTIAL_ID",
+          "name": "OpenRouter account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "f4d86b51-b5bd-4cb0-8461-e5ef85151a86",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "FEIiJtaOweSGpW4j",
+  "tags": []
+}
